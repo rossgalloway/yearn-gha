@@ -169,7 +169,7 @@ jobs:
       - name: Capture dependency audit
         if: ${{ env.AUDIT_PM != '' }}
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           out="$GITHUB_WORKSPACE/.pr-context/audit.json"
           case "$AUDIT_PM" in
             bun) bun audit --json > "$out" ;;
