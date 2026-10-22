@@ -1,0 +1,14 @@
+name: PR checks
+
+on: pull_request
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: yearn/yearn-gha/.github/workflows/pr-checks.yml@<approved-sha> # pin to the approved full commit SHA

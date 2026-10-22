@@ -390,3 +390,63 @@ See `examples/` for the current Katana APR, yvUSD APR, fapy-hook (Vercel),
 rpc-read-proxy (Cloudflare Workers) and claude-code-review shapes.
 See `specs/doppler-vercel.md`, `specs/doppler-cloudflare.md` and
 `specs/claude-code-review.md` for the full operating guides.
+
+# PR checks
+
+Reusable GitHub workflow that runs lint, format, typecheck and test on pull
+requests. It handles no secrets and requests no OIDC token.
+
+The workflow installs with bun, caching bun's global module store between runs, and reads the caller repository's
+`package.json` to decide which checks exist. A check whose script is absent
+reports "skipped" instead of failing the job, so a repository that defines
+only `lint` still gets a green run. Adding a `typecheck` script is what turns
+the typecheck step on.
+
+Because the job executes pull-request code, it runs with `contents: read`
+only, checks out with `persist-credentials: false`, and pins both the actions
+and the bun version. Never pass secrets to it.
+
+There is no `build` check: the Vercel deploy workflow above already builds every pull
+request on Vercel, and `next build` typechecks.
+
+Full design: `specs/pr-checks.md`.
+
+## Usage
+
+```yaml
+name: PR checks
+
+on: pull_request
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: yearn/yearn-gha/.github/workflows/pr-checks.yml@<approved-sha> # pin to the approved full commit SHA
+```
+
+## Inputs
+
+| Name | Required | Default | Description |
+| ---- | -------- | ------- | ----------- |
+| `bun-version` | no | `1.4.4` | Bun release installed by `oven-sh/setup-bun`. |
+
+No outputs. No secrets.
+
+## Checks
+
+| Step | Script names | Behaviour when absent |
+| ---- | ------------ | --------------------- |
+| Lint | `lint` | skipped |
+| Format | `format:check` | skipped |
+| Typecheck | `typecheck`, `type-check` | skipped |
+| Test | `test` | skipped |
+
+There is no `format` fallback. A conventional `format` script rewrites files
+and exits 0 whatever the input looked like, so the check could only fail on a
+formatter crash.

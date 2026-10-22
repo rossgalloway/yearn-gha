@@ -1,0 +1,65 @@
+name: PR checks
+
+on:
+  workflow_call:
+    inputs:
+      bun-version:
+        description: Bun version to install.
+        required: false
+        type: string
+        default: '1.4.4'
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
+      - name: Cache bun install
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'bun.lockb') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Write check script
+        run: |
+          cat > "$RUNNER_TEMP/check.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          for script in "$@"; do
+            if jq -e --arg s "$script" '.scripts[$s] // empty | select(length > 0)' package.json >/dev/null; then
+              echo "running bun run $script"
+              exec bun run "$script"
+            fi
+          done
+          echo "no $* script in package.json; skipped"
+          EOF
+          chmod +x "$RUNNER_TEMP/check.sh"
+
+      - name: Lint
+        run: "\"$RUNNER_TEMP/check.sh\" lint"
+
+      - name: Format
+        run: "\"$RUNNER_TEMP/check.sh\" format:check"
+
+      - name: Typecheck
+        run: "\"$RUNNER_TEMP/check.sh\" typecheck type-check"
+
+      - name: Test
+        run: "\"$RUNNER_TEMP/check.sh\" test"
