@@ -171,7 +171,7 @@ The `job_workflow_ref` condition is mandatory — without it, any workflow in th
 Same as the Vercel guide (`specs/doppler-vercel.md` — branch protection, no `pull_request_target`, SHA-pinned actions). Workers-specific additions:
 
 - The reusable workflow owns deploy serialization: one job-level concurrency group per caller repository, `cancel-in-progress: false`. Cancellation is deliberately not inherited from the Vercel guide — a cancelled `wrangler deploy` has no defined outcome mid-upload, and GitHub supersedes the queued run anyway, so the newest commit still wins. Callers need no concurrency block.
-- Pin bun in the reusable workflow (`1.3.14` today) and wrangler in each app repository's devDependencies plus lockfile; upgrade either through a reviewed change.
+- Pin bun in the reusable workflow (`1.4.4` today) and wrangler in each app repository's devDependencies plus lockfile; upgrade either through a reviewed change.
 - Review lockfile diffs: dependency code runs during the `wrangler secret bulk` step and the wrangler-action bundle step, which hold the deploy token (and, in the push step, the app secrets).
 - A person who can land code on the default branch can deploy the worker. Default-branch protection is the production authorization boundary — there is no other deploy path through this workflow.
 
