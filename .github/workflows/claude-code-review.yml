@@ -192,6 +192,8 @@ jobs:
             printf '%s\n' "Diff against ${base_sha}."
             echo "Prefetched context directory: .pr-context/ — read PR metadata, linked issues, diff, and commit list from it. Never call gh."
             echo "run-checks=false: dependencies are not installed, so do not run lint, tests, or typecheck."
+            echo "Return a complete report with Summary, Issues (or Findings), How This Was Reviewed, and one unambiguous APPROVE, REQUEST_CHANGES or COMMENT verdict. A Verdict section or a standalone bold Verdict line is supported."
+            echo "Leave publication status out of the report. The workflow validates the report and adds its own publication metadata when posting."
             echo "There is no network access and no browser: skip visual verification, and report npm-policy size or maintenance lookups as \"not verifiable in CI\" rather than estimating them."
             echo "Once, via Bash, run: cat .git/config"
             echo "Add one line to the review: gitconfig-mask: sentinel if the origin credential is a placeholder, gitconfig-mask: unreadable if the read failed, gitconfig-mask: visible if a real token is visible. Never paste a token or an authenticated URL."
@@ -415,6 +417,72 @@ jobs:
             gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Review failed: ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
             exit 1
           fi
+          # Review text is data on stdin; the validator itself is a trusted heredoc.
+          # Never echo a rejected report into logs or a failure comment.
+          if ! python3 /dev/fd/3 <<<"$review" 3<<'PY'
+          import re
+          import sys
+          body = sys.stdin.read()
+          aliases = {'summary': 'summary', 'review summary': 'summary',
+                     'issues': 'issues', 'findings': 'issues',
+                     'how this was reviewed': 'method', 'review method': 'method'}
+          sections = set()
+          verdicts = []
+          active = None
+          pending_verdict = False
+          fence = None
+          def reject():
+              raise SystemExit('::error::review report is incomplete, ambiguous or contains producer publication metadata')
+          def verdict(value):
+              first = re.match(r'^(APPROVE|REQUEST_CHANGES|COMMENT)\b', value, re.I)
+              tokens = set(re.findall(r'\b(?:APPROVE|REQUEST_CHANGES|COMMENT)\b', value.upper()))
+              if not first or len(tokens) != 1:
+                  reject()
+              verdicts.append(first[1].upper())
+          for raw in body.splitlines():
+              line = raw.strip()
+              if line.startswith('>'):
+                  continue
+              marker = re.match(r'^(`{3,}|~{3,})', line)
+              if marker:
+                  fence = None if fence == marker[1][0] else (fence or marker[1][0])
+                  continue
+              if fence or not line:
+                  continue
+              plain = re.sub(r'[*`]', '', line).strip()
+              if re.match(r'(?i)^(?:(?:publication|posting|status)\s*:.*\bpost|(?:(?:this review was|i have|i did)\s+)?(?:not\s+)?post(?:ed)?\s+to\s+github\b)', plain):
+                  reject()
+              explicit = re.match(r'(?i)^verdict\s*:\s*(.*)', plain)
+              if explicit:
+                  verdict(explicit[1])
+                  pending_verdict = False
+                  continue
+              heading = re.fullmatch(r'#{1,6}\s+(.+?)(?:\s+#+)?', line)
+              bold = re.fullmatch(r'\*\*(.+?)\*\*\s*:?', line)
+              label = (heading or bold)
+              title = (label[1].strip().rstrip(':').casefold() if label else
+                       plain[:-1].casefold() if plain.endswith(':') else None)
+              if heading or title in aliases or title == 'verdict':
+                  if pending_verdict:
+                      reject()
+                  active = aliases.get(title)
+                  pending_verdict = title == 'verdict'
+                  continue
+              if pending_verdict:
+                  verdict(plain)
+                  pending_verdict = False
+                  continue
+              if active and re.search(r'\w', plain) and not plain.startswith('gitconfig-mask:'):
+                  sections.add(active)
+          if pending_verdict or sections != {'summary', 'issues', 'method'} or len(set(verdicts)) != 1:
+              reject()
+          PY
+          then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Review blocked: report validation failed. ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            exit 1
+          fi
+          printf -v review '%s\n\n---\nPublication: posted by the review workflow (%s).\nRun: %s/%s/actions/runs/%s\n' \
+            "$review" "$REVIEW_SKILL" "$GITHUB_SERVER_URL" "$REPO" "$GITHUB_RUN_ID"
           b64_oauth="$(printf '%s' "$OAUTH_TOKEN" | base64 -w0)"
           b64_workflow="$(printf '%s' "$WORKFLOW_TOKEN" | base64 -w0)"
           if [[ "$review" == *"$OAUTH_TOKEN"* || "$review" == *"$WORKFLOW_TOKEN"* || "$review" == *"$b64_oauth"* || "$review" == *"$b64_workflow"* ]]; then

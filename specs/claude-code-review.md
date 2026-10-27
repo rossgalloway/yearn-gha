@@ -126,3 +126,28 @@ No outputs.
 - Skills: `yearn/webops-skills` — `review-pr-lean`, `review-pr`, `npm-policy` (pin `WEBOPS_SKILLS_SHA`)
 - Repo implementation: `yearn/yearn-gha` — `.github/workflows/claude-code-review.yml`
 - Caller examples: `examples/claude-code-review/`
+
+## Review output contract
+
+Both `/review` (`review-pr`) and `/review-workflow` (`review-pr-lean`) are prompted
+to return a summary, issues/findings, a review-method section and an unambiguous
+`APPROVE`, `REQUEST_CHANGES` or `COMMENT` verdict. Validation accepts the Verdict
+section and standalone bold/plain Verdict lines; it does not impose one Markdown
+placement. Quoted or fenced examples are excluded from verdict extraction.
+Missing/empty required sections, unsupported/conflicting verdicts and a producer's
+own publication-status line block posting and fail the workflow. Failure comments
+contain a controlled reason and run URL, not the rejected report body.
+
+The original validated report is preserved. The workflow appends its own
+publication attribution and run URL; the producer is told to leave posting status
+out. This avoids a posted report claiming it was not posted. The footer appears
+in GitHub only if the comment write succeeds. Existing raw/base64 credential
+checks remain in front of the write. Credential diagnostics are separately
+hardened by the reader-guard change tracked in yearn-metrics #49.
+
+Run `python3 -m unittest discover -s tests -p 'test_review_report.py' -v`. These
+offline fixtures execute the actual posting shell block for both command paths,
+cover both supported verdict formats, malformed/ambiguous output, producer
+publication claims and the final posted body. `tests/review_fixture.py` is shared
+byte-for-byte with the credential-guard PR so both changes can be tested
+independently and combined without duplicate fixture implementations.
