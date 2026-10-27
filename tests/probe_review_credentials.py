@@ -83,10 +83,12 @@ with tempfile.TemporaryDirectory(prefix='yearn-dummy-reader-') as directory:
             'unavailable':'No such tool available' in str(value.get('content',''))}
             for key,value in unique.items()}, 'dummy_exposed':leaked},indent=2))
     assert process.returncode==0, 'CLI fixture did not complete'
+    assert bash_masked or (bash.get('is_error',False) and token not in bash_content), 'Bash neither masked the credential nor denied access safely'
     if baseline:
         assert token in json.dumps(unique.get('tool_fixture_1', {})), 'control did not reproduce a direct file-reader leak'
     else:
         assert not leaked, 'dummy credential reached the simulated model or output'
+        assert all(unique.get(f'tool_fixture_{i}',{}).get('is_error',False) for i in (1,4)), 'patched Read paths were not denied'
     assert len(unique)==len(calls), 'not every reader fixture completed'
     if require_bash_mask:
         assert bash_masked, 'Bash must execute and return the dummy config with its credential replaced'

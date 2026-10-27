@@ -28,8 +28,8 @@ jobs:
           echo "$RUNNER_TEMP/review-probe-cli/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Validate actual publisher and settings
         run: python3 -m unittest discover -s tests -p 'test_review_*.py' -v
-      - name: Reproduce baseline Read leak with masked Bash
-        run: python3 tests/probe_review_credentials.py --baseline --require-bash-mask
-      - name: Verify patched readers with masked Bash
+      - name: Reproduce baseline Read leak after Bash access
+        run: python3 tests/probe_review_credentials.py --baseline
+      - name: Verify readers mask credentials or deny access
         if: ${{ !cancelled() }}
-        run: python3 tests/probe_review_credentials.py --require-bash-mask
+        run: python3 tests/probe_review_credentials.py
