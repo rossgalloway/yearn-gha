@@ -78,6 +78,7 @@ with tempfile.TemporaryDirectory(prefix='yearn-dummy-reader-') as directory:
     print(json.dumps({'baseline':baseline, 'runtime':subprocess.check_output(['claude','--version'],text=True).strip(),
         'exit':process.returncode, 'requests':len(captures), 'tools_available':sorted(set(tool_schemas)),
         'bash_executed':bash_executed, 'bash_credential_masked':bash_masked,
+        'bash_error':bash_content.replace(token,'<dummy-redacted>') if not bash_executed else None,
         'tool_results':{key:{'is_error':value.get('is_error',False),
             'unavailable':'No such tool available' in str(value.get('content',''))}
             for key,value in unique.items()}, 'dummy_exposed':leaked},indent=2))
