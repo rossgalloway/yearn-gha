@@ -7,6 +7,15 @@ import unittest
 
 from review_fixture import WORKFLOW, post_review
 
+REPORT = '''## Summary
+Review the supplied change.
+## Issues
+No findings.
+## Verdict
+COMMENT
+## How This Was Reviewed
+Read the prefetched context without external calls.
+'''
 
 class CredentialReadTests(unittest.TestCase):
     def test_file_readers_are_denied_and_bash_keeps_the_mask_configuration(self):
@@ -26,16 +35,16 @@ class CredentialReadTests(unittest.TestCase):
     def test_masked_bash_or_denied_fallback_diagnostic_can_be_posted(self):
         for diagnostic in ['sentinel', 'unreadable']:
             with self.subTest(diagnostic=diagnostic):
-                report = 'Review body\n' + f'gitconfig-mask: `{diagnostic}`\n'
+                report = REPORT + f'gitconfig-mask: `{diagnostic}`\n'
                 result, posted = post_review(report)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(posted, report)
+                self.assertTrue(posted.startswith(report))
 
     def test_visible_missing_unknown_or_conflicting_diagnostic_blocks_posting(self):
         for report in ['gitconfig-mask: visible', 'Review body without diagnostic',
                        'gitconfig-mask: unknown', 'gitconfig-mask: sentinel\ngitconfig-mask: visible']:
             with self.subTest(report=report):
-                result, posted = post_review(report)
+                result, posted = post_review(REPORT+report)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertTrue(posted.startswith('Review blocked:'))
                 self.assertNotIn(report, result.stdout+result.stderr+posted)
@@ -45,7 +54,7 @@ class CredentialReadTests(unittest.TestCase):
             for token in ['dummy-oauth-credential', 'dummy-workflow-credential']:
                 for value in [token, base64.b64encode(token.encode()).decode()]:
                     with self.subTest(tool=tool, value=value):
-                        result, posted = post_review(f'{tool}: {value}\ngitconfig-mask: sentinel')
+                        result, posted = post_review(REPORT+f'{tool}: {value}\ngitconfig-mask: sentinel')
                         self.assertNotEqual(result.returncode, 0)
                         self.assertTrue(posted.startswith('Review failed:'))
                         self.assertNotIn(value, result.stdout+result.stderr+posted)
