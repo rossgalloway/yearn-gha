@@ -1,0 +1,35 @@
+name: Dummy review runtime validation
+
+# Fork-only validation branch. No real model, credential or review is used.
+on:
+  push:
+    branches: [ross/review-runtime-validation]
+
+permissions:
+  contents: read
+
+jobs:
+  dummy-runtime:
+    if: github.repository == 'rossgalloway/yearn-gha'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Install sandbox dependencies and pinned runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap socat
+          npm install --prefix "$RUNNER_TEMP/review-probe-cli" --no-audit --no-fund @anthropic-ai/claude-code@2.1.308
+          echo "$RUNNER_TEMP/review-probe-cli/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Validate actual publisher and settings
+        run: python3 -m unittest discover -s tests -p 'test_review_*.py' -v
+      - name: Reproduce baseline Read leak with masked Bash
+        run: python3 tests/probe_review_credentials.py --baseline --require-bash-mask
+      - name: Verify patched readers with masked Bash
+        if: ${{ !cancelled() }}
+        run: python3 tests/probe_review_credentials.py --require-bash-mask
