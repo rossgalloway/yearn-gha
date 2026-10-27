@@ -157,7 +157,23 @@ probe reports them as unavailable rather than claiming their file operations
 were exercised. On runtimes exposing them, the same probe dispatches real calls.
 The local nested-namespace restriction prevented a successful Bash launch; the
 probe verifies its failure/fallback path, while settings tests retain the Bash
-mask contract. These limits are not a hosted GitHub Actions test. Before adopting
-the workflow revision, check the pinned action/runtime integration and require a
-safe diagnostic. Read rule scope and absolute-path syntax follow the
+mask contract.
+
+The same probe subsequently passed on GitHub Actions `ubuntu-latest` with the
+pinned CLI 2.1.308: [hosted run 40589032559](https://github.com/rossgalloway/yearn-gha/actions/runs/40589032559).
+Eight combined publisher/settings test methods passed. The baseline exposed the
+dummy value through Read, while the patched absolute/relative Read paths were
+denied and exposed no dummy value. Bash was denied before reading the file with
+`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`; Grep/Glob were
+unavailable. The security assertion requires Bash to return a credential-masked
+config or explicitly deny access without exposing the dummy value. The optional
+`--require-bash-mask` diagnostic is stricter and failed on this runner; positive
+Bash masking remains unverified. See [the saved receipt](review-credential-runtime-2026-10-27.json),
+including both unsuccessful strict diagnostic attempts.
+
+This exercises actual CLI tools against a local fake Messages API and the actual
+posting shell against an offline GitHub stub. It does not invoke the live review
+action, a real model, OIDC, production secrets or GitHub comment writes. Before
+adopting the workflow revision, obtain upstream approval, check the pinned
+action/runtime integration and require a safe diagnostic. Read rule scope and absolute-path syntax follow the
 [Claude permissions reference](https://code.claude.com/docs/en/permissions).

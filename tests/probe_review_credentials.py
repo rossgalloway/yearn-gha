@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 baseline='--baseline' in sys.argv
+require_bash_mask='--require-bash-mask' in sys.argv
 assert shutil.which('bwrap') and shutil.which('socat'), 'The dummy runtime probe requires bwrap and socat on PATH'
 workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/claude-code-review.yml').read_text()
 settings=json.loads(textwrap.dedent(workflow.split('          settings: |\n',1)[1].split('\n      #',1)[0]))
@@ -69,14 +70,25 @@ with tempfile.TemporaryDirectory(prefix='yearn-dummy-reader-') as directory:
             if isinstance(content,list):results.extend(b for b in content if b.get('type')=='tool_result')
     unique={result['tool_use_id']:result for result in results}
     leaked=token in json.dumps(captures) or token in stdout+stderr
+    bash=unique.get('tool_fixture_0',{})
+    bash_content=json.dumps(bash.get('content',''))
+    bash_executed=bool(bash) and not bash.get('is_error',False)
+    bash_masked=(bash_executed and 'github.com/yearn/example.git' in bash_content
+                 and 'x-access-token:' in bash_content and token not in bash_content)
     print(json.dumps({'baseline':baseline, 'runtime':subprocess.check_output(['claude','--version'],text=True).strip(),
         'exit':process.returncode, 'requests':len(captures), 'tools_available':sorted(set(tool_schemas)),
+        'bash_executed':bash_executed, 'bash_credential_masked':bash_masked,
+        'bash_error':bash_content.replace(token,'<dummy-redacted>') if not bash_executed else None,
         'tool_results':{key:{'is_error':value.get('is_error',False),
             'unavailable':'No such tool available' in str(value.get('content',''))}
             for key,value in unique.items()}, 'dummy_exposed':leaked},indent=2))
     assert process.returncode==0, 'CLI fixture did not complete'
+    assert bash_masked or (bash.get('is_error',False) and token not in bash_content), 'Bash neither masked the credential nor denied access safely'
     if baseline:
         assert token in json.dumps(unique.get('tool_fixture_1', {})), 'control did not reproduce a direct file-reader leak'
     else:
         assert not leaked, 'dummy credential reached the simulated model or output'
+        assert all(unique.get(f'tool_fixture_{i}',{}).get('is_error',False) for i in (1,4)), 'patched Read paths were not denied'
     assert len(unique)==len(calls), 'not every reader fixture completed'
+    if require_bash_mask:
+        assert bash_masked, 'Bash must execute and return the dummy config with its credential replaced'
