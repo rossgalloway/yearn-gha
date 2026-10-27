@@ -193,7 +193,7 @@ jobs:
             echo "Prefetched context directory: .pr-context/ — read PR metadata, linked issues, diff, and commit list from it. Never call gh."
             echo "run-checks=false: dependencies are not installed, so do not run lint, tests, or typecheck."
             echo "There is no network access and no browser: skip visual verification, and report npm-policy size or maintenance lookups as \"not verifiable in CI\" rather than estimating them."
-            echo "Once, via Bash, run: cat .git/config"
+            echo "Once, via Bash, run: cat .git/config. If Bash fails, report unreadable; do not retry with a built-in file reader."
             echo "Add one line to the review: gitconfig-mask: sentinel if the origin credential is a placeholder, gitconfig-mask: unreadable if the read failed, gitconfig-mask: visible if a real token is visible. Never paste a token or an authenticated URL."
             if [[ "$REVIEW_SKILL" == "review-pr-lean" ]]; then
               echo "Phase 0 prep already ran on the runner. Do not run prep. Its summary is in .pr-context/lean/prep.txt; use its suggested tier. If the tier is skip, review in this session with the review-pr skill instead."
@@ -352,6 +352,8 @@ jobs:
               },
               "permissions": {
                 "deny": [
+                  "Read(./.git/config)",
+                  "Read(/${{ github.workspace }}/.git/config)",
                   "Read(//proc/**)",
                   "Read(//sys/**)",
                   "Read(//home/runner/work/_temp/**)",
@@ -423,4 +425,21 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$review" > "${RUNNER_TEMP}/review.md"
+          # A successful action is not proof that the credential self-test passed.
+          # Validate only the diagnostic, without echoing untrusted review text.
+          if ! python3 - "${RUNNER_TEMP}/review.md" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          body = Path(sys.argv[1]).read_text()
+          diagnostics = re.findall(
+              r'(?im)^\s*(?:[-*]\s+)?(?:\*\*)?gitconfig-mask(?:\*\*)?\s*:\s*[`*]*([a-z_-]+)', body)
+          if len(diagnostics) != 1 or diagnostics[0].lower() not in {'sentinel', 'unreadable'}:
+              print('::error::credential masking diagnostic missing, ambiguous or unsafe', file=sys.stderr)
+              raise SystemExit(1)
+          PY
+          then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Review blocked: credential masking diagnostic failed. ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            exit 1
+          fi
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "${RUNNER_TEMP}/review.md"
