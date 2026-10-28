@@ -193,8 +193,8 @@ jobs:
             echo "Prefetched context directory: .pr-context/ — read PR metadata, linked issues, diff, and commit list from it. Never call gh."
             echo "run-checks=false: dependencies are not installed, so do not run lint, tests, or typecheck."
             echo "There is no network access and no browser: skip visual verification, and report npm-policy size or maintenance lookups as \"not verifiable in CI\" rather than estimating them."
-            echo "Once, via Bash, run: cat .git/config"
-            echo "Add one line to the review: gitconfig-mask: sentinel if the origin credential is a placeholder, gitconfig-mask: unreadable if the read failed, gitconfig-mask: visible if a real token is visible. Never paste a token or an authenticated URL."
+            echo "Once, via Bash, run: cat .git/config. If Bash fails, report unreadable; do not retry with a built-in file reader."
+            echo "Add exactly one standalone line to the review: gitconfig-mask: sentinel if the origin credential is a placeholder, gitconfig-mask: unreadable if the read failed, gitconfig-mask: visible if a real token is visible. Put any explanation on a separate line. Never paste a token or an authenticated URL."
             if [[ "$REVIEW_SKILL" == "review-pr-lean" ]]; then
               echo "Phase 0 prep already ran on the runner. Do not run prep. Its summary is in .pr-context/lean/prep.txt; use its suggested tier. If the tier is skip, review in this session with the review-pr skill instead."
               printf '%s\n' "Launch the Workflow with scriptPath ${GITHUB_WORKSPACE}/.pr-context/lean/run.js and args {\"tier\": \"<tier>\", \"verifyAgent\": \"claude\"}. It returns a task id and runs in the background."
@@ -352,6 +352,8 @@ jobs:
               },
               "permissions": {
                 "deny": [
+                  "Read(./.git/config)",
+                  "Read(/${{ github.workspace }}/.git/config)",
                   "Read(//proc/**)",
                   "Read(//sys/**)",
                   "Read(//home/runner/work/_temp/**)",
@@ -423,4 +425,23 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$review" > "${RUNNER_TEMP}/review.md"
+          # Check the model-reported diagnostic without echoing review text.
+          # This is a posting guard, not proof of sandbox enforcement.
+          if ! python3 - "${RUNNER_TEMP}/review.md" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          body = Path(sys.argv[1]).read_text()
+          # Capture the entire value, including empty/malformed entries, so a
+          # safe prefix or an extra empty diagnostic cannot pass validation.
+          diagnostics = re.findall(
+              r'(?im)^[ \t>*`-]*(?:\d+[.)][ \t]+)?gitconfig-mask[*`]*[ \t]*:([^\r\n]*)', body)
+          if len(diagnostics) != 1 or diagnostics[0].strip(' \t*`').lower() not in {'sentinel', 'unreadable'}:
+              print('::error::credential masking diagnostic missing, ambiguous or unsafe', file=sys.stderr)
+              raise SystemExit(1)
+          PY
+          then
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Review blocked: credential masking diagnostic failed. ${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
+            exit 1
+          fi
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "${RUNNER_TEMP}/review.md"

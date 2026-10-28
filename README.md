@@ -327,10 +327,16 @@ dependencies are not installed.
 
 Claude's own `Read`/`Grep`/`Glob` are not sandboxed. `settings` deny rules
 keep them out of `/proc`, `/sys`, the runner file-command directory, and
-`.config`. They are not kept out of `.git`: the pinned action writes an
-authenticated remote URL into `.git/config` before Claude starts, and
-`Read` sees it unmasked. The posting step's credential check is the only
-control between that and a posted comment.
+`.config`. The pinned action writes an authenticated remote URL into
+`.git/config` before Claude starts. Relative and absolute Read deny rules now
+protect that file from Read; Grep/Glob coverage was not exercised by the recorded
+runtime probe. Bash retains its separate credential-mask configuration, but
+successful Bash masking also remains unverified by that probe.
+Before posting, the workflow requires exactly one complete `sentinel` or
+`unreadable` diagnostic and rejects raw or base64-encoded credential values.
+The diagnostic is model-reported and cannot prove isolation or prevent a token
+from reaching a model request. File-reader access is not assumed to inherit
+the Bash sandbox's substitution.
 
 Anything other than a `/review` or `/review-workflow` comment on a pull
 request fails before the action runs. Because `issue_comment` runs with
