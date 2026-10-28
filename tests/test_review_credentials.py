@@ -22,7 +22,7 @@ class CredentialReadTests(unittest.TestCase):
         source = WORKFLOW.read_text()
         settings = source.split('          settings: |\n', 1)[1].split('\n      #', 1)[0]
         settings = json.loads(textwrap.dedent(settings))
-        # Read rules cover built-in Read/Grep/Glob; tool-specific Glob(path) rules do not.
+        # Check the configured Read rules; Grep/Glob runtime coverage is unverified.
         self.assertIn('Read(./.git/config)', settings['permissions']['deny'])
         self.assertIn('Read(/${{ github.workspace }}/.git/config)', settings['permissions']['deny'])
         credential = settings['sandbox']['credentials']['files'][0]
@@ -33,16 +33,24 @@ class CredentialReadTests(unittest.TestCase):
 
 
     def test_masked_bash_or_denied_fallback_diagnostic_can_be_posted(self):
-        for diagnostic in ['sentinel', 'unreadable']:
-            with self.subTest(diagnostic=diagnostic):
-                report = REPORT + f'gitconfig-mask: `{diagnostic}`\n'
+        for line in ['gitconfig-mask: `sentinel`', 'gitconfig-mask: unreadable', '**gitconfig-mask:** sentinel',
+                     '- **gitconfig-mask**: unreadable', '`gitconfig-mask: unreadable`', '> gitconfig-mask: sentinel',
+                     '1. gitconfig-mask: sentinel', 'gitconfig-mask: **UNREADABLE**']:
+            with self.subTest(line=line):
+                report = REPORT + line + '\n'
                 result, posted = post_review(report)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(posted.startswith(report))
 
     def test_visible_missing_unknown_or_conflicting_diagnostic_blocks_posting(self):
         for report in ['gitconfig-mask: visible', 'Review body without diagnostic',
-                       'gitconfig-mask: unknown', 'gitconfig-mask: sentinel\ngitconfig-mask: visible']:
+                       'gitconfig-mask: unknown', 'gitconfig-mask: sentinel\ngitconfig-mask: visible',
+                       'gitconfig-mask: sentinel / visible', 'gitconfig-mask: sentinel123',
+                       'gitconfig-mask: unreadable, but a token was visible',
+                       'gitconfig-mask: sentinel\ngitconfig-mask:',
+                       'gitconfig-mask: sentinel\ngitconfig-mask: 123',
+                       'gitconfig-mask: sentinel\n1. **gitconfig-mask:** visible',
+                       'gitconfig-mask:\nsentinel']:
             with self.subTest(report=report):
                 result, posted = post_review(REPORT+report)
                 self.assertNotEqual(result.returncode, 0)
