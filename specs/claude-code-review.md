@@ -32,7 +32,7 @@ The guide distinguishes two kinds of data:
 | Install `review-pr-lean` (+ `review-pr`, `npm-policy`) from `yearn/webops-skills` pinned by `WEBOPS_SKILLS_SHA` | Done |
 | Action `prompt` invokes pinned `review-pr` (`/review`) or `review-pr-lean` (`/review-workflow`), not an inlined review rubric | Done |
 | `--allowedTools` is read + Skill/Task/Agent/Workflow/TaskOutput/TaskStop; no comment/write tools. The `Bash(...)` entries (read-only `gh`, named git verbs, lint scripts) are declarative only — the sandbox auto-approves Bash, so they gate nothing | Done |
-| `settings` enables the built-in Bash sandbox (no unsandboxed commands, `GITHUB_TOKEN`/`GH_TOKEN` denied to subprocesses, empty network allowlist) and denies `Read`/`Grep`/`Glob` identically on `/proc`, `/sys`, `/home/runner/work/_temp`, and `/home/runner/.config` — the sandbox is the sole boundary for Bash and subprocesses, the deny list for Claude's file tools. The checkout's `.git` is **not** denied to the file tools (removed in `8d7d2f3`); see residual risk below | Done |
+| `settings` enables the built-in Bash sandbox (no unsandboxed commands, `GITHUB_TOKEN`/`GH_TOKEN` denied to subprocesses, empty network allowlist) and denies `Read`/`Grep`/`Glob` identically on `/proc`, `/sys`, `/home/runner/work/_temp`, and `/home/runner/.config` — the sandbox is the sole boundary for Bash and subprocesses, the deny list for Claude's file tools. The checkout's `.git/config` is denied to built-in file readers by relative and absolute Read rules, while the Bash sandbox retains its credential mask | Done |
 | Prompt states there is no network or browser: skip visual verification, report npm-policy lookups as not verifiable in CI | Done |
 | A runner step prefetches PR metadata, linked issues, diff, diffstat, changed files, PR commit list, and `bun audit` / `npm audit` (when a manifest or lockfile changed) into `.pr-context/`; the prompt names the directory, sets `run-checks=false`. For `/review-workflow`, a runner step runs `review-pr-lean` prep (`review.mjs prep --no-checkout`) with `GH_TOKEN` and a one-shot git auth header in env, and writes `run.js` and `prep.txt` to `.pr-context/lean/`. Sandbox network stays closed | Done |
 | Review body from the action result text; a follow-up step posts `gh pr comment` | Done |
@@ -60,7 +60,7 @@ Risks that remain:
 
 - `CLAUDE_CODE_OAUTH_TOKEN` is a long-lived credential on the runner for the duration of the run. The Doppler fetch is short-lived, the token it returns is not; there is no OIDC equivalent for the Claude credential itself today. Storage and rotation are now centralized (one Doppler secret, `claude setup-token` again). **Accepted risk — state it plainly:** a compromised run can read the token.
 - The Doppler identity trusts every caller repository in the org, so any workflow in any org repository can authenticate as it and fetch the token directly — not only this reusable workflow. **Accepted risk — state it plainly:** the workflow's gates bound what this workflow does with the token, not who else in the org can read it.
-- Claude reads the PR and runs named git verbs on the checked-out PR head. Project lint is allowlisted but usually cannot run: the workflow deliberately does not install dependencies (an install would execute PR-controlled lifecycle scripts on a runner holding the token), so lint executes only where a caller repository already has its dependencies on disk, and the review reports it as not verifiable in CI otherwise. Where it does run, those lint scripts are PR-controlled. The token is not in the job env (`inject-env-vars: false`) and never touches `$GITHUB_ENV`; the validate step re-emits the cleaned value as a masked step output, which feeds only the action input and the posting step's leak check. Two controls split the coverage. The built-in Bash sandbox (`sandbox.enabled` in `settings`, `allowUnsandboxedCommands: false`) confines every Bash command and child process: it denies writes to `.git/config` and `.git/hooks` in the working directory with no opt-out (closing the `git log --output=` write primitive), strips `GITHUB_TOKEN`/`GH_TOKEN` from subprocess environments, denies reads of `/home/runner/work/_temp`, masks the workflow token in the checkout's `.git/config` (so git still loads it), and blocks all network access (empty allowlist — the allowlisted `gh` verbs fail loudly rather than reach `api.github.com`). Claude's own `Read`/`Grep`/`Glob` are not sandboxed, so the `settings` deny rules keep them out of `/proc`, `/sys`, `/home/runner/work/_temp`, and `/home/runner/.config`. The checkout's `.git` is no longer denied (the three `.git` deny rules were removed in `8d7d2f3`), and the pinned action rewrites the origin URL to embed the workflow token in `.git/config` before Claude starts: the sandbox masks that value for Bash, but an unsandboxed `Read` of `.git/config` sees the real token. **Residual risk — state it plainly:** the posting step's verbatim/base64 credential check is the only control between that read and a posted comment. The sandbox needs `bubblewrap` and `socat`, both installed by the workflow before the Claude step, which also clears `kernel.apparmor_restrict_unprivileged_userns` (ubuntu-24.04 blocks the user namespace `bwrap` needs — clearing it weakens host-level userns isolation runner-wide for the rest of the job, a deliberate trade to enable subprocess isolation). A malicious lint script still runs, and a malicious same-repo PR can still prompt-inject. **Residual risk — state it plainly.** Push is blocked by `contents: read` (checkout also uses `persist-credentials: false`). It cannot merge.
+- Claude reads the PR and runs named git verbs on the checked-out PR head. Project lint is allowlisted but usually cannot run: the workflow deliberately does not install dependencies (an install would execute PR-controlled lifecycle scripts on a runner holding the token), so lint executes only where a caller repository already has its dependencies on disk, and the review reports it as not verifiable in CI otherwise. Where it does run, those lint scripts are PR-controlled. The token is not in the job env (`inject-env-vars: false`) and never touches `$GITHUB_ENV`; the validate step re-emits the cleaned value as a masked step output, which feeds only the action input and the posting step's leak check. Two controls split the coverage. The built-in Bash sandbox (`sandbox.enabled` in `settings`, `allowUnsandboxedCommands: false`) confines every Bash command and child process: it denies writes to `.git/config` and `.git/hooks` in the working directory with no opt-out (closing the `git log --output=` write primitive), strips `GITHUB_TOKEN`/`GH_TOKEN` from subprocess environments, denies reads of `/home/runner/work/_temp`, masks the workflow token in the checkout's `.git/config` (so git still loads it), and blocks all network access (empty allowlist — the allowlisted `gh` verbs fail loudly rather than reach `api.github.com`). Claude's own `Read`/`Grep`/`Glob` are not sandboxed, so the `settings` deny rules keep them out of `/proc`, `/sys`, `/home/runner/work/_temp`, and `/home/runner/.config`. The pinned action rewrites the origin URL to embed the workflow token in `.git/config` before Claude starts. Bash retains its credential mask, and relative plus absolute `Read` deny rules protect that file from the built-in `Read` tool. Grep/Glob coverage through the shared `Read` rule is unverified: the hosted runtime did not expose either tool. **Residual risk.** The prompt forbids falling back to a file reader after a Bash failure. A missing, conflicting or visible `gitconfig-mask` diagnostic blocks review posting and fails the step; only `sentinel` or `unreadable` is accepted. The existing verbatim/base64 credential check remains a second posting guard. The sandbox needs `bubblewrap` and `socat`, both installed by the workflow before the Claude step, which also clears `kernel.apparmor_restrict_unprivileged_userns` (ubuntu-24.04 blocks the user namespace `bwrap` needs — clearing it weakens host-level userns isolation runner-wide for the rest of the job, a deliberate trade to enable subprocess isolation). A malicious lint script still runs, and a malicious same-repo PR can still prompt-inject. **Residual risk — state it plainly.** Push is blocked by `contents: read` (checkout also uses `persist-credentials: false`). It cannot merge.
 - The commenter gate is an effective-permission check, so everyone with repository write access can spend review tokens at will; there is no rate limit beyond per-PR concurrency cancellation in the caller.
 - Review comments are advisory. The workflow is not a required check and must not gate merges; Claude review does not replace human review.
 
@@ -157,3 +157,62 @@ cover both supported verdict formats, malformed/ambiguous output, producer
 publication claims and the final posted body. `tests/review_fixture.py` is shared
 byte-for-byte with the credential-guard PR so both changes can be tested
 independently and combined without duplicate fixture implementations.
+
+## Credential-read regression checks
+
+Run `python3 -m unittest discover -s tests -p 'test_review_credentials.py' -v`.
+The tests execute the actual posting shell block against an offline `gh` stub
+with dummy credentials. They cover safe Bash/denied-fallback diagnostics,
+visible/missing/conflicting diagnostics, malformed values and empty duplicates,
+and raw or base64-encoded dummy credential
+output attributed to Bash, Read fallback, Grep and Glob. Configuration checks
+verify both file-reader denials and the retained Bash mask/extraction settings.
+No live token or authenticated config is read.
+
+The posting guard accepts exactly one complete `sentinel` or `unreadable`
+diagnostic, with optional Markdown emphasis, code ticks, quote or list prefixes.
+Any explanation belongs on a separate line. This is a model-reported status,
+not an independent sandbox check: it cannot prevent credentials already read
+by a tool from reaching model requests. The raw/base64 output check is also
+limited to those representations, not arbitrary encodings.
+
+An additional deterministic runtime probe uses the installed Claude CLI against
+an in-process fake Messages API, with a fresh config directory, a dummy API key
+and a temporary dummy `.git/config`. It calls the real tool engine; it does not
+contact a model, use live credentials, or start subagents. With `claude`, `bwrap`
+and `socat` on PATH, run both controls:
+
+```bash
+python3 tests/probe_review_credentials.py --baseline
+python3 tests/probe_review_credentials.py
+```
+
+The baseline removes the new Read rules and must reproduce a dummy file-reader
+leak; the patched probe must keep the dummy value out of every simulated model
+request and output. This was validated on Claude Code 2.1.308: after a Bash
+sandbox error, absolute and relative Read calls exposed the dummy value before
+the fix and were denied after it. That runtime did not expose Grep/Glob; the
+probe reports them as unavailable rather than claiming their file operations
+were exercised. On runtimes exposing them, the same probe dispatches real calls.
+The local nested-namespace restriction prevented a successful Bash launch; the
+probe verifies its failure/fallback path, while settings tests retain the Bash
+mask contract.
+
+The same probe subsequently passed on GitHub Actions `ubuntu-latest` with the
+pinned CLI 2.1.308: [hosted run 40589032559](https://github.com/rossgalloway/yearn-gha/actions/runs/40589032559).
+Eight combined publisher/settings test methods passed. The baseline exposed the
+dummy value through Read, while the patched absolute/relative Read paths were
+denied and exposed no dummy value. Bash was denied before reading the file with
+`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`; Grep/Glob were
+unavailable. The security assertion requires Bash to return a credential-masked
+config or explicitly deny access without exposing the dummy value. The optional
+`--require-bash-mask` diagnostic is stricter and failed on this runner; positive
+Bash masking remains unverified. See [the saved receipt](review-credential-runtime-2026-10-27.json),
+including both unsuccessful strict diagnostic attempts.
+
+This exercises actual CLI tools against a local fake Messages API and the actual
+posting shell against an offline GitHub stub. It does not invoke the live review
+action, a real model, OIDC, production secrets or GitHub comment writes. Before
+adopting the workflow revision, obtain upstream approval, check the pinned
+action/runtime integration and require a safe diagnostic. Read rule scope and absolute-path syntax follow the
+[Claude permissions reference](https://code.claude.com/docs/en/permissions).
