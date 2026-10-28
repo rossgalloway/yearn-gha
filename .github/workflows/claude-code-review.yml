@@ -429,6 +429,7 @@ jobs:
           sections = set()
           verdicts = []
           active = None
+          active_level = None
           pending_verdict = False
           fence = None
           def reject():
@@ -441,16 +442,24 @@ jobs:
               verdicts.append(first[1].upper())
           for raw in body.splitlines():
               line = raw.strip()
+              if fence:
+                  if re.fullmatch(re.escape(fence[0]) + '{' + str(len(fence)) + r',}\s*', line):
+                      fence = None
+                  continue
               if line.startswith('>'):
                   continue
               marker = re.match(r'^(`{3,}|~{3,})', line)
               if marker:
-                  fence = None if fence == marker[1][0] else (fence or marker[1][0])
+                  fence = marker[1]
                   continue
-              if fence or not line:
+              if not line:
                   continue
               plain = re.sub(r'[*`]', '', line).strip()
-              if re.match(r'(?i)^(?:(?:publication|posting|status)\s*:.*\bpost|(?:(?:this review was|i have|i did)\s+)?(?:not\s+)?post(?:ed)?\s+to\s+github\b)', plain):
+              # Posting claims remain claims when formatted as a list or heading.
+              status = re.sub(r'^(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?', '', line)
+              status = re.sub(r'[*`]', '', status).strip()
+              status = re.sub(r'^#{1,6}\s+', '', status)
+              if re.match(r'(?i)^(?:(?:publication|posting|status)\s*:.*\bpost|(?:(?:this review was|i have|i did)\s+)?(?:not\s+)?post(?:ed)?\s+to\s+github\b)', status):
                   reject()
               explicit = re.match(r'(?i)^verdict\s*:\s*(.*)', plain)
               if explicit:
@@ -465,16 +474,27 @@ jobs:
               if heading or title in aliases or title == 'verdict':
                   if pending_verdict:
                       reject()
-                  active = aliases.get(title)
+                  level = len(line) - len(line.lstrip('#')) if heading else 6
+                  if title in aliases or title == 'verdict':
+                      active = aliases.get(title, title)
+                      active_level = level
+                  elif active_level is not None and level <= active_level:
+                      active = None
+                      active_level = None
                   pending_verdict = title == 'verdict'
                   continue
               if pending_verdict:
                   verdict(plain)
                   pending_verdict = False
                   continue
+              if active == 'verdict':
+                  # Do not silently discard a second, conflicting verdict value.
+                  if re.match(r'^(APPROVE|REQUEST_CHANGES|COMMENT)\b', plain, re.I):
+                      verdict(plain)
+                  continue
               if active and re.search(r'\w', plain) and not plain.startswith('gitconfig-mask:'):
                   sections.add(active)
-          if pending_verdict or sections != {'summary', 'issues', 'method'} or len(set(verdicts)) != 1:
+          if fence or pending_verdict or sections != {'summary', 'issues', 'method'} or len(set(verdicts)) != 1:
               reject()
           PY
           then

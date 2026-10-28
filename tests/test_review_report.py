@@ -33,10 +33,14 @@ class ReviewReportTests(unittest.TestCase):
             '## Verdict\nUNKNOWN\n'+SECTIONS,
             '**Verdict: APPROVE / REQUEST_CHANGES**\n'+SECTIONS,
             '**Verdict: APPROVE**\n## Verdict\nREQUEST_CHANGES\n'+SECTIONS,
+            '## Verdict\nAPPROVE\nREQUEST_CHANGES\n'+SECTIONS,
             '```markdown\n## Verdict\nAPPROVE\n```\n'+SECTIONS,
             '**Verdict: APPROVE**\n'+SECTIONS.replace('## Summary\nThis change corrects a stored-value comparison.', ''),
             '**Verdict: APPROVE**\n'+SECTIONS.replace('No findings.', ''),
             '**Verdict: APPROVE**\n'+SECTIONS.replace('## How This Was Reviewed\nRead the supplied diff and checked the affected callers.', ''),
+            '**Verdict: APPROVE**\n'+SECTIONS+'\n```markdown\nUnclosed example',
+            # A shorter fence cannot end this example and supply real sections.
+            '**Verdict: APPROVE**\n````markdown\n```\n'+SECTIONS+'\n````',
         ]
         for skill in ['review-pr', 'review-pr-lean']:
             for report in cases:
@@ -48,7 +52,10 @@ class ReviewReportTests(unittest.TestCase):
                     self.assertNotIn(report, result.stdout+result.stderr+posted)
 
     def test_producer_cannot_claim_its_own_publication_status(self):
-        for status in ['Not posted to GitHub.', 'Posted to GitHub.', '**Publication: Not posted to GitHub**']:
+        for status in ['Not posted to GitHub.', 'Posted to GitHub.', '**Publication: Not posted to GitHub**',
+                       '- Not posted to GitHub.', '* **Publication:** Not posted to GitHub.',
+                       '1. **Posted to GitHub:** No', '- [ ] Posted to GitHub',
+                       '### Publication: Not posted to GitHub']:
             with self.subTest(status=status):
                 report = '**Verdict: APPROVE**\n'+SECTIONS+'\n'+status
                 result, posted = post_review(report)
@@ -61,6 +68,29 @@ class ReviewReportTests(unittest.TestCase):
         result, posted = post_review(report)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(posted.startswith(report))
+
+    def test_nested_fences_do_not_expose_example_verdicts(self):
+        for skill in ['review-pr', 'review-pr-lean']:
+            for example in [
+                '````markdown\n```\nVerdict: REQUEST_CHANGES\n```\n````',
+                '~~~markdown\n```\nVerdict: REQUEST_CHANGES\n```\n~~~',
+                '```markdown\n```not-a-closing-fence\nVerdict: REQUEST_CHANGES\n```',
+            ]:
+                with self.subTest(skill=skill, example=example):
+                    report = '**Verdict: COMMENT**\n'+SECTIONS+'\n'+example+'\n'
+                    result, posted = post_review(report, review_skill=skill)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(posted.startswith(report))
+
+    def test_required_sections_can_contain_subheadings(self):
+        for skill in ['review-pr', 'review-pr-lean']:
+            with self.subTest(skill=skill):
+                report = '## Verdict\nCOMMENT\n'+SECTIONS.replace(
+                    'No findings.', '### Correctness\nNo findings.').replace(
+                    'Read the supplied diff', '### Scope\nRead the supplied diff')
+                result, posted = post_review(report, review_skill=skill)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(posted.startswith(report))
 
 
 if __name__ == '__main__':

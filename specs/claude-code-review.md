@@ -134,13 +134,19 @@ to return a summary, issues/findings, a review-method section and an unambiguous
 `APPROVE`, `REQUEST_CHANGES` or `COMMENT` verdict. Validation accepts the Verdict
 section and standalone bold/plain Verdict lines; it does not impose one Markdown
 placement. Quoted or fenced examples are excluded from verdict extraction.
+Code fences close only with the same marker and at least the opening length;
+unclosed fences block publication so the workflow footer cannot become code.
+Required sections can contain subheadings. Multiple verdict values within a
+Verdict section must agree, just like repeated standalone verdict lines.
 Missing/empty required sections, unsupported/conflicting verdicts and a producer's
-own publication-status line block posting and fail the workflow. Failure comments
+own publication-status line (including list or heading formatting) block posting
+and fail the workflow. Failure comments
 contain a controlled reason and run URL, not the rejected report body.
 
 The original validated report is preserved. The workflow appends its own
 publication attribution and run URL; the producer is told to leave posting status
-out. This avoids a posted report claiming it was not posted. The footer appears
+out. The validator rejects recognized posting-status forms; it is not a semantic
+check of arbitrary prose or the accuracy of the review's findings. The footer appears
 in GitHub only if the comment write succeeds. Existing raw/base64 credential
 checks remain in front of the write. Credential diagnostics are separately
 hardened by the reader-guard change tracked in yearn-metrics #49.
